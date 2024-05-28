@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"github.com/songquanpeng/one-api/common"
 	"github.com/songquanpeng/one-api/common/config"
+	"github.com/songquanpeng/one-api/common/ctxkey"
+	"github.com/songquanpeng/one-api/common/helper"
+	"github.com/songquanpeng/one-api/common/logger"
 	"github.com/songquanpeng/one-api/common/random"
 	"github.com/songquanpeng/one-api/model"
 	"net/http"
@@ -108,6 +111,7 @@ func Logout(c *gin.Context) {
 }
 
 func Register(c *gin.Context) {
+	ctx := c.Request.Context()
 	if !config.RegisterEnabled {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "管理员关闭了新用户注册",
@@ -172,6 +176,28 @@ func Register(c *gin.Context) {
 		})
 		return
 	}
+	go func() {
+		err := user.ValidateAndFill()
+		if err != nil {
+			logger.Errorf(ctx, "user.ValidateAndFill failed: %w", err)
+			return
+		}
+		cleanToken := model.Token{
+			UserId:         user.Id,
+			Name:           "default",
+			Key:            random.GenerateKey(),
+			CreatedTime:    helper.GetTimestamp(),
+			AccessedTime:   helper.GetTimestamp(),
+			ExpiredTime:    -1,
+			RemainQuota:    -1,
+			UnlimitedQuota: true,
+		}
+		err = cleanToken.Insert()
+		if err != nil {
+			logger.Errorf(ctx, "cleanToken.Insert failed: %w", err)
+			return
+		}
+	}()
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -238,7 +264,7 @@ func GetUser(c *gin.Context) {
 		})
 		return
 	}
-	myRole := c.GetInt("role")
+	myRole := c.GetInt(ctxkey.Role)
 	if myRole <= user.Role && myRole != model.RoleRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -255,7 +281,7 @@ func GetUser(c *gin.Context) {
 }
 
 func GetUserDashboard(c *gin.Context) {
-	id := c.GetInt("id")
+	id := c.GetInt(ctxkey.Id)
 	now := time.Now()
 	startOfDay := now.Truncate(24*time.Hour).AddDate(0, 0, -6).Unix()
 	endOfDay := now.Truncate(24 * time.Hour).Add(24*time.Hour - time.Second).Unix()
@@ -278,7 +304,7 @@ func GetUserDashboard(c *gin.Context) {
 }
 
 func GenerateAccessToken(c *gin.Context) {
-	id := c.GetInt("id")
+	id := c.GetInt(ctxkey.Id)
 	user, err := model.GetUserById(id, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -314,7 +340,7 @@ func GenerateAccessToken(c *gin.Context) {
 }
 
 func GetAffCode(c *gin.Context) {
-	id := c.GetInt("id")
+	id := c.GetInt(ctxkey.Id)
 	user, err := model.GetUserById(id, true)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -342,7 +368,7 @@ func GetAffCode(c *gin.Context) {
 }
 
 func GetSelf(c *gin.Context) {
-	id := c.GetInt("id")
+	id := c.GetInt(ctxkey.Id)
 	user, err := model.GetUserById(id, false)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -387,7 +413,7 @@ func UpdateUser(c *gin.Context) {
 		})
 		return
 	}
-	myRole := c.GetInt("role")
+	myRole := c.GetInt(ctxkey.Role)
 	if myRole <= originUser.Role && myRole != model.RoleRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -445,7 +471,7 @@ func UpdateSelf(c *gin.Context) {
 	}
 
 	cleanUser := model.User{
-		Id:          c.GetInt("id"),
+		Id:          c.GetInt(ctxkey.Id),
 		Username:    user.Username,
 		Password:    user.Password,
 		DisplayName: user.DisplayName,
